@@ -58,7 +58,7 @@ def parse_args():
     if args.generation_limit < 1: raise ValueError('you must set --generation-limit >= 1')
   except Exception as ex:
     p.print_usage(file=sys.stderr)
-    print(ex, file=sys.stderr)
+    print(ex)
     sys.exit()
 
   return args
@@ -524,9 +524,9 @@ class AttentionMT(Chain):
 
   def save_spec(self, filename):
     with open(filename, 'w') as fp:
-      print(self.vocab_size, file=fp)
-      print(self.embed_size, file=fp)
-      print(self.hidden_size, file=fp)
+      print(self.vocab_size)
+      print(self.embed_size)
+      print(self.hidden_size)
 
   @staticmethod
   def load_spec(filename):
@@ -582,17 +582,17 @@ def forward(src_batch, trg_batch, src_vocab, trg_vocab, attmt, is_training, gene
     return hyp_batch
 
 def train(args):
-  trace('making vocabularies ...')
+  print('making vocabularies ...')
   src_vocab = Vocabulary.new(gens.word_list(args.source), args.vocab)
   trg_vocab = Vocabulary.new(gens.word_list(args.target), args.vocab)
 
-  trace('making model ...')
+  print('making model ...')
   attmt = AttentionMT(args.vocab, args.embed, args.hidden)
   if args.use_gpu:
     attmt.to_gpu()
 
   for epoch in range(args.epoch):
-    trace('epoch %d/%d: ' % (epoch + 1, args.epoch))
+    print('epoch %d/%d: ' % (epoch + 1, args.epoch))
     trained = 0
     gen1 = gens.word_list(args.source)
     gen2 = gens.word_list(args.target)
@@ -610,21 +610,22 @@ def train(args):
       opt.update()
 
       for k in range(K):
-        trace('epoch %3d/%3d, sample %8d' % (epoch + 1, args.epoch, trained + k + 1))
-        trace('  src = ' + ' '.join([x if x != '</s>' else '*' for x in src_batch[k]]))
-        trace('  trg = ' + ' '.join([x if x != '</s>' else '*' for x in trg_batch[k]]))
-        trace('  hyp = ' + ' '.join([x if x != '</s>' else '*' for x in hyp_batch[k]]))
+        print('epoch %3d/%3d, sample %8d' % (epoch + 1, args.epoch, trained + k + 1))
+        print('  src = ' + ' '.join([x if x != '</s>' else '*' for x in src_batch[k]]))
+        print('  trg = ' + ' '.join([x if x != '</s>' else '*' for x in trg_batch[k]]))
+        print('  hyp = ' + ' '.join([x if x != '</s>' else '*' for x in hyp_batch[k]]))
 
       trained += K
-
-    trace('saving model ...')
+    
+    print 'loss: ', loss.data
+    print('saving model ...')
     prefix = args.model + '.%03.d' % (epoch + 1)
     src_vocab.save(prefix + '.srcvocab')
     trg_vocab.save(prefix + '.trgvocab')
     attmt.save_spec(prefix + '.spec')
     serializers.save_hdf5(prefix + '.weights', attmt)
 
-  trace('finished.')
+  print('finished.')
 
 def test(args):
   trace('loading model ...')
@@ -649,7 +650,7 @@ def test(args):
       for hyp in hyp_batch:
         hyp.append('</s>')
         hyp = hyp[:hyp.index('</s>')]
-        print(' '.join(hyp), file=fp)
+        print(' '.join(hyp))
 
       generated += K
 

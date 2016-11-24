@@ -5,6 +5,8 @@ from chainer import Chain, Variable, cuda, functions, links, optimizer, optimize
 import util.generators as gens
 from util.functions import trace, fill_batch
 from util.vocabulary import Vocabulary
+from chainer import initializers
+import numpy as np
 
 def parse_args():
   def_gpu_device = 0
@@ -57,7 +59,7 @@ def parse_args():
     if args.generation_limit < 1: raise ValueError('you must set --generation-limit >= 1')
   except Exception as ex:
     p.print_usage(file=sys.stderr)
-    print(ex, file=sys.stderr)
+    print(ex)
     sys.exit()
 
   return args
@@ -70,8 +72,10 @@ class XP:
     if args.use_gpu:
       XP.__lib = cuda.cupy
       cuda.get_device(args.gpu_device).use()
+      cuda.cupy.random.seed(0)
     else:
       XP.__lib = numpy
+      numpy.random.seed(3)
 
   @staticmethod
   def __zeros(shape, dtype):
@@ -97,13 +101,23 @@ class Encoder(Chain):
   def __init__(self, vocab_size, embed_size, hidden_size):
     super(Encoder, self).__init__(
         xe = links.EmbedID(vocab_size, embed_size),
-        eh = links.Linear(embed_size, 4 * hidden_size),
-        hh = links.Linear(hidden_size, 4 * hidden_size),
+        lstm = links.LSTM(embed_size, hidden_size),
+#         hh = links.Linear(hidden_size, 4 * hidden_size),
+#         eh = links.Linear(embed_size, 4 * hidden_size),
     )
 
   def __call__(self, x, c, h):
-    e = functions.tanh(self.xe(x))
-    return functions.lstm(c, self.eh(e) + self.hh(h)) 
+    embeded_x = self.xe(x)
+    e = functions.tanh(embeded_x)
+#     self.lstm.upward.W = self.eh.W
+#     self.lstm.upward.b = self.eh.b
+#     self.lstm.lateral.W = self.hh.W
+#     self.lstm.lateral.b = self.hh.b
+#     old_return = functions.lstm(c, self.eh(e) + self.hh(h)) 
+    new_return = self.lstm(e)
+    return (self.lstm.c, new_return)
+#     return old_return
+
 
 class Decoder(Chain):
   def __init__(self, vocab_size, embed_size, hidden_size):
@@ -145,9 +159,9 @@ class EncoderDecoder(Chain):
 
   def save_spec(self, filename):
     with open(filename, 'w') as fp:
-      print(self.vocab_size, file=fp)
-      print(self.embed_size, file=fp)
-      print(self.hidden_size, file=fp)
+      print(self.vocab_size)
+      print(self.embed_size)
+      print(self.hidden_size)
 
   @staticmethod
   def load_spec(filename):
@@ -165,6 +179,10 @@ def forward(src_batch, trg_batch, src_vocab, trg_vocab, encdec, is_training, gen
   trg_stoi = trg_vocab.stoi
   trg_itos = trg_vocab.itos
   encdec.reset(batch_size)
+#   encdec.enc.lstm.reset_state()
+  encdec.enc.lstm.c = XP.fzeros((batch_size, encdec.hidden_size))
+  encdec.enc.lstm.h = XP.fzeros((batch_size, encdec.hidden_size))
+
 
   x = XP.iarray([src_stoi('</s>') for _ in range(batch_size)])
   encdec.encode(x)
@@ -199,17 +217,17 @@ def forward(src_batch, trg_batch, src_vocab, trg_vocab, encdec, is_training, gen
     return hyp_batch
 
 def train(args):
-  trace('making vocabularies ...')
+  print('making vocabularies ...')
   src_vocab = Vocabulary.new(gens.word_list(args.source), args.vocab)
   trg_vocab = Vocabulary.new(gens.word_list(args.target), args.vocab)
 
-  trace('making model ...')
+  print('making model ...')
   encdec = EncoderDecoder(args.vocab, args.embed, args.hidden)
   if args.use_gpu:
     encdec.to_gpu()
 
   for epoch in range(args.epoch):
-    trace('epoch %d/%d: ' % (epoch + 1, args.epoch))
+    print('epoch %d/%d: ' % (epoch + 1, args.epoch))
     trained = 0
     gen1 = gens.word_list(args.source)
     gen2 = gens.word_list(args.target)
@@ -227,14 +245,15 @@ def train(args):
       opt.update()
 
       for k in range(K):
-        trace('epoch %3d/%3d, sample %8d' % (epoch + 1, args.epoch, trained + k + 1))
-        trace('  src = ' + ' '.join([x if x != '</s>' else '*' for x in src_batch[k]]))
-        trace('  trg = ' + ' '.join([x if x != '</s>' else '*' for x in trg_batch[k]]))
-        trace('  hyp = ' + ' '.join([x if x != '</s>' else '*' for x in hyp_batch[k]]))
+        print('epoch %3d/%3d, sample %8d, loss: %f' % (epoch + 1, args.epoch, trained + k + 1, loss.data))
+        print('  src = ' + ' '.join([x if x != '</s>' else '*' for x in src_batch[k]]))
+        print('  trg = ' + ' '.join([x if x != '</s>' else '*' for x in trg_batch[k]]))
+        print('  hyp = ' + ' '.join([x if x != '</s>' else '*' for x in hyp_batch[k]]))
 
       trained += K
 
-    trace('saving model ...')
+    print 'loss: ', loss.data
+    print('saving model ...')
     prefix = args.model + '.%03.d' % (epoch + 1)
     src_vocab.save(prefix + '.srcvocab')
     trg_vocab.save(prefix + '.trgvocab')
@@ -266,7 +285,7 @@ def test(args):
       for hyp in hyp_batch:
         hyp.append('</s>')
         hyp = hyp[:hyp.index('</s>')]
-        print(' '.join(hyp), file=fp)
+        print(' '.join(hyp))
 
       generated += K
 
